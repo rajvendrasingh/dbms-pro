@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Challan Detail — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:.6rem 1.5rem; }
+    .detail-field label { font-size:.78rem; color:#6b7280; text-transform:uppercase; letter-spacing:.5px; }
+    .detail-field .val  { font-size:.95rem; font-weight:600; margin-top:.1rem; }
+    .section-title { font-size:.9rem; font-weight:700; color:#374151; margin:1.2rem 0 .6rem; padding-bottom:.4rem; border-bottom:1px solid var(--border); }
+    .print-btn-row { display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1.5rem; }
+  </style>
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('Challan Detail', 'challans');
+
+const params = new URLSearchParams(location.search);
+const challanId = params.get('id');
+
+async function loadDetail() {
+  if (!challanId) { document.getElementById('page-content').innerHTML = '<div class="alert alert-error">No challan ID provided.</div>'; return; }
+
+  const { ok, data } = await api.get(`/challans/${challanId}`);
+  if (!ok) { document.getElementById('page-content').innerHTML = `<div class="alert alert-error">${data.message}</div>`; return; }
+
+  const c = data.data;
+  const officer = getOfficer();
+  const isAdmin = officer && ['SP','DSP','Inspector'].includes(officer.rank);
+
+  document.getElementById('page-content').innerHTML = `
+    <div style="max-width:800px">
+      <!-- Print view -->
+      <div class="challan-print" id="print-area">
+        <div class="challan-print-header">
+          <div style="font-size:2rem">🚦</div>
+          <h2>TRAFFIC CHALLAN</h2>
+          <div style="font-size:.85rem;color:#555">Government of India — Traffic Police Department</div>
+          <div style="margin-top:.5rem;font-size:.9rem">
+            Challan No: <strong>${c.challan_number}</strong> &nbsp;|&nbsp;
+            Status: <strong>${c.status}</strong>
+          </div>
+        </div>
+        <div class="challan-print-grid">
+          <div class="challan-field"><label>Vehicle No.</label><br><span>${c.registration_no}</span></div>
+          <div class="challan-field"><label>Vehicle Type</label><br><span>${c.vehicle_type}</span></div>
+          <div class="challan-field"><label>Owner Name</label><br><span>${c.owner_name}</span></div>
+          <div class="challan-field"><label>Phone</label><br><span>${c.owner_phone}</span></div>
+          <div class="challan-field"><label>License No.</label><br><span>${c.license_no||'—'}</span></div>
+          <div class="challan-field"><label>Make / Model</label><br><span>${c.make||''} ${c.model||''}</span></div>
+          <div class="challan-field"><label>Violation</label><br><span>${c.violation_desc}</span></div>
+          <div class="challan-field"><label>IPC Section</label><br><span>${c.ipc_section||'—'}</span></div>
+          <div class="challan-field"><label>Date & Time</label><br><span>${formatDateTime(c.violation_date)}</span></div>
+          <div class="challan-field"><label>Location</label><br><span>${c.location}</span></div>
+          <div class="challan-field"><label>Zone</label><br><span>${c.zone_name||'—'}, ${c.city||''}</span></div>
+          <div class="challan-field"><label>Fine Amount</label><br><span style="color:red;font-size:1.1rem">${formatCurrency(c.fine_amount)}</span></div>
+          <div class="challan-field"><label>Due Date</label><br><span>${formatDate(c.due_date)}</span></div>
+          <div class="challan-field"><label>Issued By</label><br><span>${c.officer_name} (${c.badge_number})</span></div>
+        </div>
+        ${c.notes ? `<div style="margin-top:1rem;font-size:.85rem"><strong>Notes:</strong> ${c.notes}</div>` : ''}
+        ${c.status === 'Paid' ? `
+        <div style="margin-top:1rem;padding-top:1rem;border-top:1px dashed #333;font-size:.85rem">
+          <strong>✅ PAID</strong> on ${formatDateTime(c.payment_date)} via ${c.payment_method}
+          ${c.transaction_ref ? `· Ref: ${c.transaction_ref}` : ''}
+        </div>` : ''}
+      </div>
+
+      <!-- Action buttons -->
+      <div class="print-btn-row">
+        <button class="btn btn-outline" onclick="window.print()">🖨️ Print / Download</button>
+        ${c.status === 'Pending' ? `<a href="/pages/payment.html?challan_id=${c.challan_id}" class="btn btn-success">💳 Record Payment</a>` : ''}
+        ${c.status === 'Pending' ? `<button class="btn btn-warning" onclick="openDisputeModal()">⚖️ Raise Dispute</button>` : ''}
+        ${isAdmin && c.status !== 'Paid' ? `
+          <button class="btn btn-outline" onclick="changeStatus('Cancelled')">❌ Cancel</button>
+          <button class="btn btn-outline" onclick="changeStatus('Waived')">🔓 Waive</button>
+        ` : ''}
+        <a href="/pages/challans.html" class="btn btn-outline">← Back to List</a>
+      </div>
+    </div>
+
+    <!-- Dispute Modal -->
+    <div class="modal-overlay" id="dispute-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>⚖️ Raise Dispute</h3>
+          <button class="modal-close" onclick="closeDisputeModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Raised By (Name)</label>
+            <input type="text" id="dispute-name" placeholder="Vehicle owner / lawyer name" value="${c.owner_name}">
+          </div>
+          <div class="form-group">
+            <label>Reason for Dispute *</label>
+            <textarea id="dispute-reason" placeholder="Explain the reason..." rows="4"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" onclick="closeDisputeModal()">Cancel</button>
+          <button class="btn btn-warning" onclick="submitDispute()">Submit Dispute</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function openDisputeModal()  { document.getElementById('dispute-modal').classList.add('open'); }
+function closeDisputeModal() { document.getElementById('dispute-modal').classList.remove('open'); }
+
+async function submitDispute() {
+  const raised_by = document.getElementById('dispute-name').value.trim();
+  const reason    = document.getElementById('dispute-reason').value.trim();
+  if (!reason) { showToast('Please enter reason', 'error'); return; }
+
+  const { ok, data } = await api.post('/violations/disputes', { challan_id: challanId, raised_by, reason });
+  if (ok) { showToast('Dispute raised successfully', 'success'); closeDisputeModal(); loadDetail(); }
+  else showToast(data.message || 'Failed', 'error');
+}
+
+async function changeStatus(status) {
+  if (!confirm(`Mark challan as "${status}"?`)) return;
+  const { ok, data } = await api.patch(`/challans/${challanId}/status`, { status });
+  if (ok) { showToast(data.message, 'success'); loadDetail(); }
+  else showToast(data.message || 'Failed', 'error');
+}
+
+loadDetail();
+</script>
+</body>
+</html>

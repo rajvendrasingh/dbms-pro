@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vehicle Lookup — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .lookup-box { max-width:600px; margin:0 auto; }
+    .veh-profile { background:#fff; border-radius:10px; box-shadow:var(--shadow-md); padding:1.5rem; margin-top:1rem; }
+    .veh-header { display:flex; align-items:center; gap:1rem; margin-bottom:1.2rem; }
+    .veh-icon { width:60px; height:60px; border-radius:12px; background:#eff6ff; display:flex; align-items:center; justify-content:center; font-size:2rem; flex-shrink:0; }
+    .veh-reg { font-size:1.4rem; font-weight:700; letter-spacing:1px; }
+    .veh-sub { color:#6b7280; font-size:.85rem; }
+    .info-section { display:grid; grid-template-columns:1fr 1fr; gap:.5rem 1.5rem; font-size:.88rem; }
+    .info-row label { color:#6b7280; font-size:.78rem; }
+    .info-row span  { font-weight:600; }
+    .challan-history { margin-top:1.5rem; }
+    .expire-warn { color:var(--danger); }
+  </style>
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('Vehicle Lookup', 'lookup');
+
+document.getElementById('page-content').innerHTML = `
+  <div class="lookup-box">
+    <div class="card">
+      <div class="card-title" style="margin-bottom:1rem">🔍 Vehicle & Challan Lookup</div>
+      <div style="display:flex;gap:.5rem">
+        <input type="text" id="lookup-reg" placeholder="Enter Registration Number (e.g. DL01AB1234)"
+          style="text-transform:uppercase;font-size:1rem;font-weight:600;letter-spacing:1px"
+          onkeydown="if(event.key==='Enter') doLookup()">
+        <button class="btn btn-primary btn-lg" onclick="doLookup()">Search</button>
+      </div>
+      <p style="font-size:.8rem;color:#9ca3af;margin-top:.4rem">Enter the full vehicle registration number</p>
+    </div>
+    <div id="lookup-result"></div>
+  </div>
+`;
+
+async function doLookup() {
+  const reg = document.getElementById('lookup-reg').value.trim().toUpperCase();
+  if (!reg) { showToast('Enter registration number', 'warning'); return; }
+
+  const result = document.getElementById('lookup-result');
+  result.innerHTML = '<div class="loading-state">🔍 Searching vehicle records...</div>';
+
+  const [vRes, cRes] = await Promise.all([
+    api.get(`/vehicles/${reg}`),
+    api.get(`/challans/vehicle/${reg}`)
+  ]);
+
+  if (!vRes.ok) {
+    result.innerHTML = `
+      <div class="alert alert-warning" style="margin-top:1rem">
+        ⚠️ Vehicle <strong>${reg}</strong> not found in records.
+        <a href="/pages/register-vehicle.html" style="color:var(--primary);font-weight:600;margin-left:.5rem">Register this vehicle →</a>
+      </div>`;
+    return;
+  }
+
+  const v = vRes.data.data;
+  const challans = cRes.data?.data || [];
+
+  const today = new Date();
+  const insExpiry = v.insurance_expiry ? new Date(v.insurance_expiry) : null;
+  const rcExpiry  = v.rc_expiry        ? new Date(v.rc_expiry)        : null;
+  const insClass  = insExpiry && insExpiry < today ? 'expire-warn' : '';
+  const rcClass   = rcExpiry  && rcExpiry  < today ? 'expire-warn' : '';
+
+  const pendingChallans = challans.filter(c => c.status === 'Pending');
+  const paidChallans    = challans.filter(c => c.status === 'Paid');
+  const totalFine       = challans.reduce((s,c) => s + parseFloat(c.fine_amount||0), 0);
+  const pendingFine     = pendingChallans.reduce((s,c) => s + parseFloat(c.fine_amount||0), 0);
+
+  const vehicleIcons = { 'Two-Wheeler':'🏍️', 'Three-Wheeler':'🛺', 'Four-Wheeler':'🚗', 'Heavy Vehicle':'🚛', 'Bus':'🚌', 'Truck':'🚚' };
+  const vIcon = vehicleIcons[v.vehicle_type] || '🚗';
+
+  const challanRows = challans.map(c => `
+    <tr>
+      <td><a href="/pages/challan-detail.html?id=${c.challan_id}" style="color:var(--primary);font-weight:600">${c.challan_number}</a></td>
+      <td>${c.violation_desc||c.violation_code}</td>
+      <td>${formatCurrency(c.fine_amount)}</td>
+      <td>${statusBadge(c.status)}</td>
+      <td>${formatDate(c.violation_date)}</td>
+      <td>
+        ${c.status==='Pending'
+          ? `<a href="/pages/payment.html?challan_id=${c.challan_id}" class="btn btn-success btn-sm">Pay</a>`
+          : '—'}
+      </td>
+    </tr>
+  `).join('');
+
+  result.innerHTML = `
+    <div class="veh-profile">
+      <div class="veh-header">
+        <div class="veh-icon">${vIcon}</div>
+        <div>
+          <div class="veh-reg">${v.registration_no}</div>
+          <div class="veh-sub">${v.vehicle_type} · ${v.make||''} ${v.model||''} ${v.color?'('+v.color+')':''} ${v.year||''}</div>
+          ${v.is_blacklisted ? '<span class="badge badge-critical">⛔ BLACKLISTED</span>' : '<span class="badge badge-active">✅ Clear</span>'}
+        </div>
+      </div>
+
+      <div class="info-section">
+        <div class="info-row"><label>Owner Name</label><br><span>${v.full_name}</span></div>
+        <div class="info-row"><label>Phone</label><br><span>${v.phone}</span></div>
+        <div class="info-row"><label>License No.</label><br><span>${v.license_no}</span></div>
+        <div class="info-row"><label>Aadhar No.</label><br><span>${v.aadhar_no||'—'}</span></div>
+        <div class="info-row"><label>Insurance Expiry</label><br><span class="${insClass}">${formatDate(v.insurance_expiry)} ${insExpiry&&insExpiry<today?'⚠️ EXPIRED':''}</span></div>
+        <div class="info-row"><label>RC Expiry</label><br><span class="${rcClass}">${formatDate(v.rc_expiry)} ${rcExpiry&&rcExpiry<today?'⚠️ EXPIRED':''}</span></div>
+      </div>
+
+      <!-- Summary -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem;margin-top:1.2rem;padding-top:1rem;border-top:1px solid var(--border)">
+        <div style="text-align:center"><div style="font-size:1.5rem;font-weight:700">${challans.length}</div><div style="font-size:.75rem;color:#6b7280">Total Challans</div></div>
+        <div style="text-align:center"><div style="font-size:1.5rem;font-weight:700;color:var(--warning)">${pendingChallans.length}</div><div style="font-size:.75rem;color:#6b7280">Pending</div></div>
+        <div style="text-align:center"><div style="font-size:1.5rem;font-weight:700;color:var(--secondary)">${paidChallans.length}</div><div style="font-size:.75rem;color:#6b7280">Paid</div></div>
+        <div style="text-align:center"><div style="font-size:1.3rem;font-weight:700;color:var(--danger)">${formatCurrency(pendingFine)}</div><div style="font-size:.75rem;color:#6b7280">Pending Fine</div></div>
+      </div>
+
+      <!-- Challan history -->
+      <div class="challan-history">
+        <div style="font-weight:600;margin-bottom:.6rem">📋 Challan History (${challans.length})</div>
+        ${challans.length ? `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Challan No.</th><th>Violation</th><th>Fine</th><th>Status</th><th>Date</th><th></th></tr></thead>
+            <tbody>${challanRows}</tbody>
+          </table>
+        </div>` : '<div class="empty-state" style="padding:1rem">No challans found for this vehicle. 🎉</div>'}
+      </div>
+
+      <div style="margin-top:1rem;display:flex;gap:.75rem;flex-wrap:wrap">
+        <a href="/pages/issue-challan.html" class="btn btn-primary" onclick="localStorage.setItem('prefill_reg','${v.registration_no}')">📝 Issue New Challan</a>
+        <button class="btn btn-outline" onclick="window.print()">🖨️ Print Report</button>
+      </div>
+    </div>
+  `;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vehicles — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('Vehicles', 'vehicles');
+
+let currentPage = 1;
+
+async function loadVehicles(page = 1) {
+  currentPage = page;
+  const q           = document.getElementById('v-search')?.value.trim() || '';
+  const blacklisted = document.getElementById('v-blacklisted')?.value   || '';
+
+  const params = new URLSearchParams({ page, limit: 20 });
+  if (q)           params.append('q', q);
+  if (blacklisted) params.append('blacklisted', blacklisted);
+
+  const tbody = document.getElementById('v-tbody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="loading-state">⏳</td></tr>`;
+
+  const { ok, data } = await api.get(`/vehicles?${params}`);
+  if (!ok) return;
+
+  const rows = data.data || [];
+
+  if (tbody) {
+    tbody.innerHTML = rows.length ? rows.map(v => {
+      const today = new Date();
+      const insExp = v.insurance_expiry ? new Date(v.insurance_expiry) : null;
+      const insWarn = insExp && insExp < today ? '⚠️' : '';
+      return `
+        <tr>
+          <td style="font-weight:600">${v.registration_no}</td>
+          <td>${v.vehicle_type}</td>
+          <td>${v.make||''} ${v.model||''}</td>
+          <td>${v.full_name}<br><small style="color:#9ca3af">${v.phone}</small></td>
+          <td>${v.license_no}</td>
+          <td>${insWarn} ${formatDate(v.insurance_expiry)}</td>
+          <td>${v.is_blacklisted ? '<span class="badge badge-critical">Blacklisted</span>' : '<span class="badge badge-active">Active</span>'}</td>
+          <td style="display:flex;gap:.4rem;flex-wrap:wrap">
+            <a href="/pages/lookup.html?reg=${v.registration_no}" class="btn btn-outline btn-sm">🔍 View</a>
+            <a href="/pages/issue-challan.html" class="btn btn-primary btn-sm" onclick="localStorage.setItem('prefill_reg','${v.registration_no}')">📝 Challan</a>
+          </td>
+        </tr>`;
+    }).join('') : `<tr><td colspan="8" class="empty-state">No vehicles found.</td></tr>`;
+  }
+
+  // Pagination
+  const totalPages = Math.ceil((data.total||0) / 20);
+  const pg = document.getElementById('v-pagination');
+  if (pg) {
+    let ph = `<span style="font-size:.82rem;color:#6b7280;margin-right:.5rem">${data.total||0} records</span>`;
+    for (let i = 1; i <= Math.min(totalPages, 10); i++)
+      ph += `<button class="page-btn ${i===page?'active':''}" onclick="loadVehicles(${i})">${i}</button>`;
+    pg.innerHTML = ph;
+  }
+}
+
+document.getElementById('page-content').innerHTML = `
+  <div class="search-bar">
+    <div class="form-group">
+      <label>Search</label>
+      <input type="text" id="v-search" placeholder="Reg. no / owner / license">
+    </div>
+    <div class="form-group">
+      <label>Status</label>
+      <select id="v-blacklisted">
+        <option value="">All</option>
+        <option value="false">Active</option>
+        <option value="true">Blacklisted</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" onclick="loadVehicles(1)">🔍 Search</button>
+    <a href="/pages/register-vehicle.html" class="btn btn-success" style="margin-left:auto">➕ Register Vehicle</a>
+  </div>
+
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Reg. No.</th><th>Type</th><th>Make/Model</th><th>Owner</th><th>License</th><th>Insurance Expiry</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="v-tbody"><tr><td colspan="8" class="loading-state">⏳</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="v-pagination"></div>
+  </div>
+`;
+
+loadVehicles(1);
+</script>
+</body>
+</html>

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Register Vehicle — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('Register Vehicle', 'register-vehicle');
+
+document.getElementById('page-content').innerHTML = `
+<div style="max-width:720px">
+  <div id="page-alert"></div>
+
+  <!-- STEP 1: Owner -->
+  <div class="card" id="owner-step">
+    <div class="card-header">
+      <div class="card-title">👤 Step 1 — Vehicle Owner</div>
+    </div>
+    <p style="font-size:.85rem;color:#6b7280;margin-bottom:1rem">Search if owner already exists, or register a new one.</p>
+
+    <div style="display:flex;gap:.5rem;margin-bottom:1rem">
+      <input type="text" id="owner-search" placeholder="Search by name, phone, or license no." style="flex:1">
+      <button class="btn btn-outline" onclick="searchOwner()">Search</button>
+    </div>
+    <div id="owner-search-results"></div>
+
+    <div id="owner-form-toggle" style="margin-top:.8rem">
+      <button class="btn btn-outline btn-sm" onclick="toggleOwnerForm()">➕ Register New Owner Instead</button>
+    </div>
+
+    <div id="owner-form" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <div class="form-grid">
+        <div class="form-group"><label>Full Name *</label><input type="text" id="o-name" required></div>
+        <div class="form-group"><label>Phone *</label><input type="tel" id="o-phone" required placeholder="10-digit mobile"></div>
+        <div class="form-group"><label>Email</label><input type="email" id="o-email" placeholder="optional"></div>
+        <div class="form-group"><label>License No. *</label><input type="text" id="o-license" required placeholder="e.g. DL0120230001234"></div>
+        <div class="form-group"><label>Aadhar No.</label><input type="text" id="o-aadhar" placeholder="12-digit"></div>
+        <div class="form-group form-full"><label>Address</label><textarea id="o-address" rows="2"></textarea></div>
+      </div>
+      <button class="btn btn-primary" onclick="registerOwner()">Register Owner & Continue</button>
+    </div>
+
+    <div id="owner-selected" style="display:none;padding:.8rem;background:#f0fdf4;border-radius:8px;margin-top:.8rem;border:1px solid #a7f3d0">
+      <span style="color:#065f46;font-weight:600" id="owner-selected-text"></span>
+      <button class="btn btn-outline btn-sm" style="margin-left:.8rem" onclick="clearOwner()">Change</button>
+    </div>
+  </div>
+
+  <!-- STEP 2: Vehicle -->
+  <div class="card" id="vehicle-step" style="margin-top:1rem;opacity:.5;pointer-events:none">
+    <div class="card-header"><div class="card-title">🚗 Step 2 — Vehicle Details</div></div>
+    <form id="vehicle-form">
+      <div class="form-grid three">
+        <div class="form-group"><label>Registration No. *</label><input type="text" id="v-reg" required placeholder="DL01AB1234" style="text-transform:uppercase"></div>
+        <div class="form-group"><label>Vehicle Type *</label>
+          <select id="v-type" required>
+            <option value="">—Select—</option>
+            <option>Two-Wheeler</option><option>Three-Wheeler</option><option>Four-Wheeler</option>
+            <option>Heavy Vehicle</option><option>Bus</option><option>Truck</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Year</label><input type="number" id="v-year" min="1990" max="2026"></div>
+        <div class="form-group"><label>Make (Brand)</label><input type="text" id="v-make" placeholder="Honda, Maruti..."></div>
+        <div class="form-group"><label>Model</label><input type="text" id="v-model" placeholder="Activa, Swift..."></div>
+        <div class="form-group"><label>Color</label><input type="text" id="v-color"></div>
+        <div class="form-group"><label>Insurance Expiry</label><input type="date" id="v-ins"></div>
+        <div class="form-group"><label>RC Expiry</label><input type="date" id="v-rc"></div>
+      </div>
+      <div style="display:flex;gap:.75rem;margin-top:.5rem">
+        <button type="submit" class="btn btn-primary btn-lg">✅ Register Vehicle</button>
+        <button type="button" class="btn btn-outline" onclick="resetAll()">Reset</button>
+      </div>
+    </form>
+  </div>
+</div>
+`;
+
+let selectedOwnerId = null;
+let ownerFormVisible = false;
+
+function toggleOwnerForm() {
+  ownerFormVisible = !ownerFormVisible;
+  document.getElementById('owner-form').style.display = ownerFormVisible ? 'block' : 'none';
+}
+
+async function searchOwner() {
+  const q = document.getElementById('owner-search').value.trim();
+  if (!q) return showToast('Enter search term', 'warning');
+  const { ok, data } = await api.get(`/vehicles/owners/search?q=${encodeURIComponent(q)}`);
+  const results = data?.data || [];
+  const div = document.getElementById('owner-search-results');
+  if (!results.length) { div.innerHTML = '<div style="color:#9ca3af;font-size:.85rem">No owners found. Register below.</div>'; return; }
+  div.innerHTML = results.map(o => `
+    <div style="display:flex;align-items:center;gap:.8rem;padding:.6rem;border:1px solid var(--border);border-radius:6px;margin-bottom:.4rem">
+      <div style="flex:1"><strong>${o.full_name}</strong> · ${o.phone} · ${o.license_no}</div>
+      <button class="btn btn-primary btn-sm" onclick="selectOwner(${o.owner_id},'${o.full_name}','${o.license_no}')">Select</button>
+    </div>`).join('');
+}
+
+function selectOwner(id, name, license) {
+  selectedOwnerId = id;
+  document.getElementById('owner-selected-text').textContent = `✅ Owner: ${name} (${license})`;
+  document.getElementById('owner-selected').style.display = 'block';
+  document.getElementById('owner-search-results').innerHTML = '';
+  document.getElementById('owner-form').style.display = 'none';
+  enableVehicleStep();
+}
+
+function clearOwner() {
+  selectedOwnerId = null;
+  document.getElementById('owner-selected').style.display = 'none';
+  disableVehicleStep();
+}
+
+async function registerOwner() {
+  const payload = {
+    full_name:  document.getElementById('o-name').value.trim(),
+    phone:      document.getElementById('o-phone').value.trim(),
+    email:      document.getElementById('o-email').value.trim() || null,
+    license_no: document.getElementById('o-license').value.trim(),
+    aadhar_no:  document.getElementById('o-aadhar').value.trim() || null,
+    address:    document.getElementById('o-address').value.trim() || null
+  };
+  if (!payload.full_name || !payload.phone || !payload.license_no)
+    return showToast('Name, phone, and license no. are required', 'warning');
+
+  const { ok, data } = await api.post('/vehicles/owner', payload);
+  if (ok) {
+    showToast('Owner registered!', 'success');
+    selectOwner(data.owner_id, payload.full_name, payload.license_no);
+  } else showToast(data.message || 'Failed', 'error');
+}
+
+function enableVehicleStep() {
+  const step = document.getElementById('vehicle-step');
+  step.style.opacity = '1';
+  step.style.pointerEvents = 'all';
+}
+function disableVehicleStep() {
+  const step = document.getElementById('vehicle-step');
+  step.style.opacity = '.5';
+  step.style.pointerEvents = 'none';
+}
+
+document.getElementById('vehicle-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!selectedOwnerId) { showToast('Please select or register an owner first', 'error'); return; }
+
+  const payload = {
+    registration_no:  document.getElementById('v-reg').value.trim().toUpperCase(),
+    owner_id:         selectedOwnerId,
+    vehicle_type:     document.getElementById('v-type').value,
+    make:             document.getElementById('v-make').value.trim() || null,
+    model:            document.getElementById('v-model').value.trim() || null,
+    color:            document.getElementById('v-color').value.trim() || null,
+    year:             document.getElementById('v-year').value  || null,
+    insurance_expiry: document.getElementById('v-ins').value   || null,
+    rc_expiry:        document.getElementById('v-rc').value    || null
+  };
+
+  const { ok, data } = await api.post('/vehicles', payload);
+  if (ok) {
+    showToast(`Vehicle ${payload.registration_no} registered!`, 'success');
+    document.getElementById('page-alert').innerHTML = `
+      <div class="alert alert-success">
+        ✅ Vehicle <strong>${payload.registration_no}</strong> registered successfully.
+        <a href="/pages/lookup.html" style="color:var(--primary);font-weight:600;margin-left:.5rem">View →</a>
+      </div>`;
+    resetAll();
+  } else showToast(data.message || 'Failed', 'error');
+});
+
+function resetAll() {
+  selectedOwnerId = null;
+  document.getElementById('owner-selected').style.display = 'none';
+  document.getElementById('owner-search').value = '';
+  document.getElementById('owner-search-results').innerHTML = '';
+  document.getElementById('owner-form').style.display = 'none';
+  document.getElementById('vehicle-form').reset();
+  disableVehicleStep();
+}
+</script>
+</body>
+</html>

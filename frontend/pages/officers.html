@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Officers — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('Officers Management', 'officers');
+
+async function loadOfficers() {
+  const { ok, data } = await api.get('/officers');
+  const rows = data?.data || [];
+  const tbody = document.getElementById('o-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = rows.length ? rows.map(o => `
+    <tr>
+      <td>${o.badge_number}</td>
+      <td><strong>${o.full_name}</strong><br><small style="color:#9ca3af">${o.email}</small></td>
+      <td>${o.rank}</td>
+      <td>${o.zone_name||'—'}, ${o.city||''}</td>
+      <td>${o.phone||'—'}</td>
+      <td><strong>${o.total_challans||0}</strong></td>
+      <td>${o.is_active ? '<span class="badge badge-active">Active</span>' : '<span class="badge badge-inactive">Inactive</span>'}</td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="viewStats(${o.officer_id},'${o.full_name}')">📊 Stats</button>
+        <button class="btn btn-outline btn-sm" onclick="editOfficer(${o.officer_id})">✏️ Edit</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="8" class="empty-state">No officers found.</td></tr>';
+}
+
+async function viewStats(id, name) {
+  const { ok, data } = await api.get(`/officers/${id}/stats`);
+  const s = data?.data || {};
+  showModal(`📊 Stats — ${name}`, `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem">
+      <div class="stat-card"><div class="stat-icon blue">📋</div><div><div class="stat-value">${s.total_challans||0}</div><div class="stat-label">Total Challans</div></div></div>
+      <div class="stat-card"><div class="stat-icon green">💰</div><div><div class="stat-value" style="font-size:1.1rem">${formatCurrency(s.collected)}</div><div class="stat-label">Collected</div></div></div>
+      <div class="stat-card"><div class="stat-icon yellow">⏳</div><div><div class="stat-value" style="font-size:1.1rem">${formatCurrency(s.pending)}</div><div class="stat-label">Pending</div></div></div>
+      <div class="stat-card"><div class="stat-icon red">⚖️</div><div><div class="stat-value">${s.disputed||0}</div><div class="stat-label">Disputed</div></div></div>
+    </div>`);
+}
+
+function editOfficer(id) { showToast('Edit officer — coming in next iteration', 'info'); }
+
+function showModal(title, body, footer='') {
+  let m = document.getElementById('generic-modal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'generic-modal';
+    m.className = 'modal-overlay';
+    m.innerHTML = `<div class="modal">
+      <div class="modal-header"><h3 id="gm-title"></h3><button class="modal-close" onclick="document.getElementById('generic-modal').classList.remove('open')">✕</button></div>
+      <div class="modal-body" id="gm-body"></div>
+      <div class="modal-footer" id="gm-footer"><button class="btn btn-outline" onclick="document.getElementById('generic-modal').classList.remove('open')">Close</button></div>
+    </div>`;
+    document.body.appendChild(m);
+  }
+  document.getElementById('gm-title').textContent = title;
+  document.getElementById('gm-body').innerHTML = body;
+  if (footer) document.getElementById('gm-footer').innerHTML = footer;
+  m.classList.add('open');
+}
+
+document.getElementById('page-content').innerHTML = `
+  <div style="display:flex;justify-content:flex-end;margin-bottom:1rem">
+    <button class="btn btn-primary" onclick="document.getElementById('add-officer-modal').classList.add('open')">➕ Add Officer</button>
+  </div>
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Badge</th><th>Name / Email</th><th>Rank</th><th>Zone</th><th>Phone</th><th>Challans</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="o-tbody"><tr><td colspan="8" class="loading-state">⏳</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Add Officer Modal -->
+  <div class="modal-overlay" id="add-officer-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>➕ Add New Officer</h3>
+        <button class="modal-close" onclick="document.getElementById('add-officer-modal').classList.remove('open')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="add-alert"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Badge Number *</label><input type="text" id="n-badge" placeholder="e.g. DL0001"></div>
+          <div class="form-group"><label>Full Name *</label><input type="text" id="n-name"></div>
+          <div class="form-group"><label>Email *</label><input type="email" id="n-email"></div>
+          <div class="form-group"><label>Password *</label><input type="password" id="n-pass" placeholder="min 6 chars"></div>
+          <div class="form-group"><label>Phone</label><input type="tel" id="n-phone"></div>
+          <div class="form-group"><label>Rank</label>
+            <select id="n-rank">
+              <option>Constable</option><option>Head Constable</option><option>ASI</option>
+              <option>SI</option><option>Inspector</option><option>DSP</option><option>SP</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="document.getElementById('add-officer-modal').classList.remove('open')">Cancel</button>
+        <button class="btn btn-primary" onclick="addOfficer()">Add Officer</button>
+      </div>
+    </div>
+  </div>
+`;
+
+async function addOfficer() {
+  const payload = {
+    badge_number: document.getElementById('n-badge').value.trim(),
+    full_name:    document.getElementById('n-name').value.trim(),
+    email:        document.getElementById('n-email').value.trim(),
+    password:     document.getElementById('n-pass').value,
+    phone:        document.getElementById('n-phone').value.trim() || null,
+    rank:         document.getElementById('n-rank').value
+  };
+  if (!payload.badge_number || !payload.full_name || !payload.email || !payload.password)
+    return showToast('All required fields must be filled', 'warning');
+
+  const { ok, data } = await api.post('/officers', payload);
+  if (ok) {
+    showToast('Officer added successfully', 'success');
+    document.getElementById('add-officer-modal').classList.remove('open');
+    loadOfficers();
+  } else {
+    document.getElementById('add-alert').innerHTML = `<div class="alert alert-error">${data.message}</div>`;
+  }
+}
+
+loadOfficers();
+</script>
+</body>
+</html>

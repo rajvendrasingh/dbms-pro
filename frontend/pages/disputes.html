@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Disputes — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('Dispute Management', 'disputes');
+
+let disputesList = [];
+
+async function loadDisputes() {
+  const { ok, data } = await api.get('/violations/disputes');
+  disputesList = data?.data || [];
+  renderDisputes();
+}
+
+function renderDisputes() {
+  const filter = document.getElementById('d-filter')?.value || '';
+  const rows   = filter ? disputesList.filter(d => d.status === filter) : disputesList;
+  const tbody  = document.getElementById('d-tbody');
+  if (!tbody) return;
+
+  const statusColors = { Open:'badge-pending', 'Under Review':'badge-moderate', Resolved:'badge-paid', Rejected:'badge-cancelled' };
+
+  tbody.innerHTML = rows.length ? rows.map(d => `
+    <tr>
+      <td>${d.dispute_id}</td>
+      <td><a href="/pages/challan-detail.html?id=${d.challan_id}" style="color:var(--primary);font-weight:600">${d.challan_number}</a></td>
+      <td>${d.registration_no}</td>
+      <td>${d.raised_by}</td>
+      <td style="max-width:200px">${d.reason}</td>
+      <td>${formatCurrency(d.fine_amount)}</td>
+      <td><span class="badge ${statusColors[d.status]||''}">${d.status}</span></td>
+      <td>${formatDate(d.raised_at)}</td>
+      <td>
+        ${d.status === 'Open' || d.status === 'Under Review' ? `
+          <button class="btn btn-success btn-sm" onclick="resolveDispute(${d.dispute_id},'Resolved')">✅ Resolve</button>
+          <button class="btn btn-danger btn-sm" onclick="resolveDispute(${d.dispute_id},'Rejected')">❌ Reject</button>
+        ` : d.resolution || '—'}
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="9" class="empty-state">No disputes found.</td></tr>';
+}
+
+async function resolveDispute(id, status) {
+  const resolution = prompt(`Resolution note for "${status}":`, '');
+  if (resolution === null) return;
+  const { ok, data } = await api.patch(`/violations/disputes/${id}`, { status, resolution });
+  if (ok) { showToast(data.message, 'success'); loadDisputes(); }
+  else showToast(data.message || 'Failed', 'error');
+}
+
+document.getElementById('page-content').innerHTML = `
+  <div class="search-bar">
+    <div class="form-group">
+      <label>Filter by Status</label>
+      <select id="d-filter" onchange="renderDisputes()">
+        <option value="">All</option>
+        <option>Open</option>
+        <option>Under Review</option>
+        <option>Resolved</option>
+        <option>Rejected</option>
+      </select>
+    </div>
+    <button class="btn btn-outline" onclick="loadDisputes()">🔄 Refresh</button>
+  </div>
+
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th>Challan</th><th>Vehicle</th><th>Raised By</th><th>Reason</th><th>Fine</th><th>Status</th><th>Date</th><th>Action</th></tr>
+        </thead>
+        <tbody id="d-tbody"><tr><td colspan="9" class="loading-state">⏳</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+`;
+
+loadDisputes();
+</script>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Issue Challan — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .vehicle-found { background:#f0fdf4; border:1px solid #a7f3d0; border-radius:8px; padding:1rem; margin-top:.5rem; }
+    .vehicle-found h4 { color:#065f46; margin-bottom:.5rem; }
+    .vf-grid { display:grid; grid-template-columns:1fr 1fr; gap:.4rem .8rem; font-size:.85rem; }
+    .vf-grid span { font-weight:600; }
+    .blacklist-warn { background:#fef2f2; border:1px solid #fca5a5; border-radius:8px; padding:.8rem 1rem; color:#991b1b; margin-top:.5rem; font-size:.88rem; }
+    .success-challan { text-align:center; padding:2.5rem 1rem; }
+    .success-challan .big-icon { font-size:4rem; }
+    .success-challan h2 { color:var(--secondary); margin:.8rem 0 .3rem; }
+    .challan-num { font-size:1.6rem; font-weight:700; letter-spacing:2px; color:var(--primary); border:2px dashed var(--primary); padding:.4rem 1.2rem; border-radius:8px; display:inline-block; margin:.6rem 0; }
+  </style>
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('Issue New Challan', 'issue-challan');
+
+let violations = [];
+let zones      = [];
+let vehicleData = null;
+
+async function init() {
+  const [v, z] = await Promise.all([
+    api.get('/violations'),
+    api.get('/violations/zones')
+  ]);
+  violations = v.data?.data || [];
+  zones      = z.data?.data || [];
+  renderForm();
+}
+
+function renderForm() {
+  const vOptions = violations.map(v =>
+    `<option value="${v.violation_id}" data-fine="${v.fine_amount}">
+      [${v.violation_code}] ${v.description} — ₹${Number(v.fine_amount).toLocaleString('en-IN')} (${v.severity})
+    </option>`
+  ).join('');
+
+  const zOptions = zones.map(z =>
+    `<option value="${z.zone_id}">${z.zone_name}, ${z.city}</option>`
+  ).join('');
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="card" style="max-width:720px">
+      <div class="card-header">
+        <div class="card-title">📝 Issue New Traffic Challan</div>
+      </div>
+
+      <div id="form-alert"></div>
+      <div id="success-view" style="display:none"></div>
+
+      <form id="challan-form">
+        <!-- Step 1: Vehicle -->
+        <fieldset style="border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1rem">
+          <legend style="font-weight:600;padding:0 .5rem;font-size:.9rem">🚗 Vehicle Details</legend>
+          <div class="form-group" style="margin-bottom:.5rem">
+            <label>Registration Number *</label>
+            <div style="display:flex;gap:.5rem">
+              <input type="text" id="reg-no" placeholder="e.g. DL01AB1234" style="text-transform:uppercase" required>
+              <button type="button" class="btn btn-outline" onclick="lookupVehicle()">Search</button>
+            </div>
+          </div>
+          <div id="vehicle-info"></div>
+        </fieldset>
+
+        <!-- Step 2: Violation -->
+        <fieldset style="border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1rem">
+          <legend style="font-weight:600;padding:0 .5rem;font-size:.9rem">⚠️ Violation Details</legend>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Violation Type *</label>
+              <select id="violation-id" required onchange="updateFine()">
+                <option value="">— Select Violation —</option>
+                ${vOptions}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Fine Amount (₹)</label>
+              <input type="text" id="fine-display" readonly placeholder="Auto-filled" style="background:#f9fafb;font-weight:600;color:var(--primary)">
+            </div>
+            <div class="form-group">
+              <label>Violation Date & Time *</label>
+              <input type="datetime-local" id="violation-date" required>
+            </div>
+            <div class="form-group">
+              <label>Zone</label>
+              <select id="zone-id">
+                <option value="">— Select Zone —</option>
+                ${zOptions}
+              </select>
+            </div>
+            <div class="form-group form-full">
+              <label>Location / Address *</label>
+              <input type="text" id="location" placeholder="e.g. Near Red Fort Signal, Chandni Chowk" required>
+            </div>
+            <div class="form-group form-full">
+              <label>Additional Notes</label>
+              <textarea id="notes" placeholder="Optional remarks..."></textarea>
+            </div>
+          </div>
+        </fieldset>
+
+        <div style="display:flex;gap:.75rem;justify-content:flex-end">
+          <button type="button" class="btn btn-outline" onclick="resetForm()">Reset</button>
+          <button type="submit" class="btn btn-primary btn-lg" id="submit-btn">
+            🚨 Issue Challan
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  // Set current datetime
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  document.getElementById('violation-date').value = now.toISOString().slice(0,16);
+
+  document.getElementById('challan-form').addEventListener('submit', submitChallan);
+}
+
+async function lookupVehicle() {
+  const reg = document.getElementById('reg-no').value.trim().toUpperCase();
+  if (!reg) return showToast('Enter registration number', 'warning');
+
+  const infoDiv = document.getElementById('vehicle-info');
+  infoDiv.innerHTML = '<div style="color:#6b7280;font-size:.85rem">🔍 Looking up vehicle...</div>';
+
+  const { ok, data } = await api.get(`/vehicles/${reg}`);
+  if (!ok) {
+    infoDiv.innerHTML = `
+      <div class="alert alert-warning" style="margin-top:.5rem">
+        ⚠️ Vehicle not registered.
+        <a href="/pages/register-vehicle.html" style="color:var(--primary);font-weight:600">Register now →</a>
+      </div>`;
+    vehicleData = null;
+    return;
+  }
+
+  vehicleData = data.data;
+  const v = vehicleData;
+  const blacklistWarn = v.is_blacklisted ? `<div class="blacklist-warn">⛔ This vehicle is BLACKLISTED (5+ unpaid challans)</div>` : '';
+
+  infoDiv.innerHTML = `
+    ${blacklistWarn}
+    <div class="vehicle-found">
+      <h4>✅ Vehicle Found</h4>
+      <div class="vf-grid">
+        <div>Owner: <span>${v.full_name}</span></div>
+        <div>Phone: <span>${v.phone}</span></div>
+        <div>License No: <span>${v.license_no}</span></div>
+        <div>Vehicle Type: <span>${v.vehicle_type}</span></div>
+        <div>Make/Model: <span>${v.make||''} ${v.model||''}</span></div>
+        <div>Color/Year: <span>${v.color||'—'} / ${v.year||'—'}</span></div>
+      </div>
+    </div>`;
+}
+
+function updateFine() {
+  const sel = document.getElementById('violation-id');
+  const opt = sel.selectedOptions[0];
+  const fine = opt ? opt.dataset.fine : '';
+  document.getElementById('fine-display').value = fine ? `₹${Number(fine).toLocaleString('en-IN')}` : '';
+}
+
+async function submitChallan(e) {
+  e.preventDefault();
+  if (!vehicleData) { showToast('Please search and confirm vehicle first', 'error'); return; }
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Issuing...';
+  document.getElementById('form-alert').innerHTML = '';
+
+  const payload = {
+    registration_no: document.getElementById('reg-no').value.trim().toUpperCase(),
+    violation_id:    parseInt(document.getElementById('violation-id').value),
+    violation_date:  document.getElementById('violation-date').value,
+    location:        document.getElementById('location').value.trim(),
+    zone_id:         document.getElementById('zone-id').value || null,
+    notes:           document.getElementById('notes').value.trim() || null
+  };
+
+  const { ok, data } = await api.post('/challans', payload);
+
+  if (ok) {
+    document.getElementById('challan-form').style.display = 'none';
+    document.getElementById('success-view').style.display = 'block';
+    document.getElementById('success-view').innerHTML = `
+      <div class="success-challan">
+        <div class="big-icon">🎉</div>
+        <h2>Challan Issued Successfully!</h2>
+        <div class="challan-num">${data.challan_number}</div>
+        <p style="color:#374151;margin:.5rem 0">Fine Amount: <strong style="color:var(--danger);font-size:1.1rem">₹${Number(data.fine_amount).toLocaleString('en-IN')}</strong></p>
+        <p style="color:#6b7280;font-size:.85rem">Due within 60 days</p>
+        <div style="display:flex;gap:.75rem;justify-content:center;margin-top:1.5rem;flex-wrap:wrap">
+          <button class="btn btn-outline" onclick="window.print()">🖨️ Print Challan</button>
+          <button class="btn btn-primary" onclick="resetForm()">Issue Another</button>
+          <a href="/pages/challans.html" class="btn btn-outline">View All Challans</a>
+        </div>
+      </div>`;
+  } else {
+    document.getElementById('form-alert').innerHTML =
+      `<div class="alert alert-error">❌ ${data.message || 'Failed to issue challan.'}</div>`;
+    btn.disabled = false;
+    btn.innerHTML = '🚨 Issue Challan';
+  }
+}
+
+function resetForm() {
+  vehicleData = null;
+  document.getElementById('success-view').style.display = 'none';
+  document.getElementById('challan-form').style.display = 'block';
+  document.getElementById('challan-form').reset();
+  document.getElementById('vehicle-info').innerHTML = '';
+  document.getElementById('fine-display').value = '';
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  document.getElementById('violation-date').value = now.toISOString().slice(0,16);
+}
+
+init();
+</script>
+</body>
+</html>

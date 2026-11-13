@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Traffic Challan System — Login</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .divider { text-align:center; color:#9ca3af; font-size:.8rem; margin:.5rem 0; }
+    .demo-hint { font-size:.78rem; color:#6b7280; text-align:center; margin-top:1rem; padding:.6rem; background:#f9fafb; border-radius:6px; }
+  </style>
+</head>
+<body>
+<div class="auth-wrapper">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="icon">🚦</div>
+      <h1>Traffic Challan System</h1>
+      <p>Smart Violation & Fine Management</p>
+    </div>
+
+    <div id="login-alert"></div>
+
+    <form id="login-form">
+      <div class="form-group">
+        <label for="email">Email Address</label>
+        <input type="email" id="email" placeholder="officer@traffic.gov.in" required autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="Enter password" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg" style="width:100%" id="login-btn">
+        Login to Dashboard
+      </button>
+    </form>
+
+    <div class="demo-hint">
+      Demo: <strong>admin@traffic.gov.in</strong> / <strong>Admin@123</strong>
+    </div>
+  </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script>
+  // If already logged in, redirect
+  if (getToken()) window.location.href = '/pages/dashboard.html';
+
+  document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('login-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Logging in...';
+    document.getElementById('login-alert').innerHTML = '';
+
+    const { ok, data } = await api.post('/auth/login', {
+      email:    document.getElementById('email').value.trim(),
+      password: document.getElementById('password').value
+    });
+
+    if (ok) {
+      localStorage.setItem('challan_token',   data.token);
+      localStorage.setItem('challan_officer', JSON.stringify(data.officer));
+      window.location.href = '/pages/dashboard.html';
+    } else {
+      document.getElementById('login-alert').innerHTML =
+        `<div class="alert alert-error">⚠️ ${data.message || 'Login failed.'}</div>`;
+      btn.disabled = false;
+      btn.textContent = 'Login to Dashboard';
+    }
+  });
+</script>
+</body>
+</html>

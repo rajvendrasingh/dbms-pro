@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .charts-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:1rem; }
+    .chart-card  { background:#fff; border-radius:8px; box-shadow:var(--shadow); padding:1.2rem; }
+    .bar-chart   { display:flex; flex-direction:column; gap:.5rem; margin-top:.8rem; }
+    .bar-row     { display:flex; align-items:center; gap:.6rem; font-size:.82rem; }
+    .bar-label   { width:160px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#374151; }
+    .bar-track   { flex:1; background:#f3f4f6; border-radius:20px; height:12px; }
+    .bar-fill    { background:var(--primary); height:100%; border-radius:20px; transition:width .6s ease; }
+    .bar-val     { width:40px; text-align:right; color:#6b7280; }
+    .trend-row   { display:flex; gap:.8rem; flex-wrap:wrap; margin-top:.8rem; }
+    .trend-day   { flex:1; min-width:60px; text-align:center; }
+    .trend-bar-wrap { height:80px; display:flex; align-items:flex-end; justify-content:center; }
+    .trend-bar   { width:28px; background:var(--primary); border-radius:4px 4px 0 0; min-height:4px; }
+    .trend-label { font-size:.7rem; color:#6b7280; margin-top:.3rem; }
+    .trend-count { font-size:.78rem; font-weight:600; color:#374151; }
+    @media(max-width:768px){ .charts-grid{ grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('Dashboard', 'dashboard');
+
+async function loadDashboard() {
+  const content = document.getElementById('page-content');
+  content.innerHTML = `<div class="loading-state">⏳ Loading dashboard...</div>`;
+
+  const { ok, data } = await api.get('/challans/stats/dashboard');
+  if (!ok) { content.innerHTML = `<div class="alert alert-error">Failed to load stats.</div>`; return; }
+
+  const s = data.stats;
+  const trend = data.trend || [];
+  const topV  = data.topViolations || [];
+  const zones = data.zones || [];
+
+  const maxCount = Math.max(...trend.map(t => t.count), 1);
+  const maxVio   = Math.max(...topV.map(v => v.count), 1);
+
+  const trendHTML = trend.length ? trend.map(t => {
+    const h = Math.max(8, Math.round((t.count / maxCount) * 80));
+    const d = new Date(t.day);
+    return `<div class="trend-day">
+      <div class="trend-bar-wrap"><div class="trend-bar" style="height:${h}px" title="${t.count} challans"></div></div>
+      <div class="trend-label">${d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})}</div>
+      <div class="trend-count">${t.count}</div>
+    </div>`;
+  }).join('') : '<p style="color:#9ca3af;font-size:.85rem">No data for last 7 days.</p>';
+
+  const topVHTML = topV.map(v => `
+    <div class="bar-row">
+      <div class="bar-label" title="${v.description}">${v.description}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.round(v.count/maxVio*100)}%"></div></div>
+      <div class="bar-val">${v.count}</div>
+    </div>`).join('');
+
+  const zoneHTML = zones.map(z => `
+    <tr>
+      <td>${z.zone_name}</td>
+      <td><strong>${z.total}</strong></td>
+      <td style="color:var(--secondary)">${formatCurrency(z.collected)}</td>
+    </tr>`).join('');
+
+  content.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon blue">📋</div>
+        <div><div class="stat-value">${s.total_challans||0}</div><div class="stat-label">Total Challans</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon yellow">⏳</div>
+        <div><div class="stat-value">${s.pending_count||0}</div><div class="stat-label">Pending</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon green">✅</div>
+        <div><div class="stat-value">${s.paid_count||0}</div><div class="stat-label">Paid</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon red">⚖️</div>
+        <div><div class="stat-value">${s.disputed_count||0}</div><div class="stat-label">Disputed</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon teal">💰</div>
+        <div><div class="stat-value" style="font-size:1.2rem">${formatCurrency(s.collected)}</div><div class="stat-label">Total Collected</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon yellow">📌</div>
+        <div><div class="stat-value" style="font-size:1.2rem">${formatCurrency(s.pending_amount)}</div><div class="stat-label">Pending Amount</div></div>
+      </div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="chart-card">
+        <div class="card-title">📅 Last 7 Days — Challan Trend</div>
+        <div class="trend-row">${trendHTML}</div>
+      </div>
+      <div class="chart-card">
+        <div class="card-title">🏆 Top Violations</div>
+        <div class="bar-chart">${topVHTML || '<p style="color:#9ca3af;font-size:.85rem">No data yet.</p>'}</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <div class="card-header">
+        <div class="card-title">🗺️ Zone-wise Summary</div>
+        <a href="/pages/reports.html" class="btn btn-outline btn-sm">View Reports →</a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Zone</th><th>Challans</th><th>Collected</th></tr></thead>
+          <tbody>${zoneHTML || '<tr><td colspan="3" style="text-align:center;color:#9ca3af">No zone data.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:.8rem;margin-top:1rem;flex-wrap:wrap">
+      <a href="/pages/issue-challan.html" class="btn btn-primary">📝 Issue New Challan</a>
+      <a href="/pages/lookup.html"        class="btn btn-outline">🔍 Vehicle Lookup</a>
+      <a href="/pages/payment.html"       class="btn btn-success">💳 Record Payment</a>
+    </div>
+  `;
+}
+
+loadDashboard();
+</script>
+</body>
+</html>

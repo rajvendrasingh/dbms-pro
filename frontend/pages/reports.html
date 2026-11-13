@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .report-tabs { display:flex; gap:.4rem; margin-bottom:1rem; flex-wrap:wrap; }
+    .tab-btn { padding:.5rem 1.1rem; border:1px solid var(--border); border-radius:6px; background:#fff; cursor:pointer; font-size:.88rem; transition:all .2s; }
+    .tab-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+    .kpi-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:1rem; margin-bottom:1.5rem; }
+  </style>
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('Reports & Analytics', 'reports');
+
+document.getElementById('page-content').innerHTML = `
+  <div class="report-tabs">
+    <button class="tab-btn active" onclick="showTab('overview', this)">📊 Overview</button>
+    <button class="tab-btn" onclick="showTab('zone',     this)">🗺️ Zone-wise</button>
+    <button class="tab-btn" onclick="showTab('officer',  this)">👮 Officer-wise</button>
+    <button class="tab-btn" onclick="showTab('violation',this)">⚠️ Violations</button>
+  </div>
+  <div id="report-content"></div>
+`;
+
+async function showTab(tab, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const c = document.getElementById('report-content');
+  c.innerHTML = '<div class="loading-state">⏳ Loading report...</div>';
+
+  if (tab === 'overview')  await renderOverview(c);
+  if (tab === 'zone')      await renderZone(c);
+  if (tab === 'officer')   await renderOfficer(c);
+  if (tab === 'violation') await renderViolation(c);
+}
+
+async function renderOverview(c) {
+  const { ok, data } = await api.get('/challans/stats/dashboard');
+  if (!ok) { c.innerHTML = '<div class="alert alert-error">Failed to load.</div>'; return; }
+  const s = data.stats;
+  const trend = data.trend || [];
+  const maxCount = Math.max(...trend.map(t=>t.count),1);
+
+  const trendHTML = trend.length ? trend.map(t => {
+    const h = Math.max(8, Math.round((t.count/maxCount)*80));
+    const d = new Date(t.day);
+    return `<div style="text-align:center;flex:1;min-width:50px">
+      <div style="height:80px;display:flex;align-items:flex-end;justify-content:center">
+        <div style="width:28px;background:var(--primary);border-radius:4px 4px 0 0;height:${h}px" title="${t.count} challans"></div>
+      </div>
+      <div style="font-size:.7rem;color:#6b7280">${d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})}</div>
+      <div style="font-size:.78rem;font-weight:600">${t.count}</div>
+    </div>`;
+  }).join('') : '<p style="color:#9ca3af">No trend data.</p>';
+
+  c.innerHTML = `
+    <div class="kpi-row">
+      <div class="stat-card"><div class="stat-icon blue">📋</div><div><div class="stat-value">${s.total_challans}</div><div class="stat-label">Total Challans</div></div></div>
+      <div class="stat-card"><div class="stat-icon green">💰</div><div><div class="stat-value" style="font-size:1.1rem">${formatCurrency(s.collected)}</div><div class="stat-label">Total Collected</div></div></div>
+      <div class="stat-card"><div class="stat-icon yellow">⏳</div><div><div class="stat-value" style="font-size:1.1rem">${formatCurrency(s.pending_amount)}</div><div class="stat-label">Pending</div></div></div>
+      <div class="stat-card"><div class="stat-icon teal">📈</div><div>
+        <div class="stat-value">${s.total_challans>0?Math.round(s.paid_count/s.total_challans*100):0}%</div>
+        <div class="stat-label">Collection Rate</div>
+      </div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:.8rem">📅 Daily Trend (Last 7 Days)</div>
+      <div style="display:flex;gap:.6rem;align-items:flex-end;overflow-x:auto;padding-bottom:.5rem">${trendHTML}</div>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <div class="card-title" style="margin-bottom:.8rem">📊 Status Breakdown</div>
+      <div style="display:flex;gap:1rem;flex-wrap:wrap">
+        ${[
+          ['Paid', s.paid_count, '#d1fae5','#065f46'],
+          ['Pending', s.pending_count, '#fef3c7','#92400e'],
+          ['Disputed', s.disputed_count, '#fee2e2','#991b1b'],
+          ['Cancelled', s.cancelled_count, '#f3f4f6','#374151']
+        ].map(([label, val, bg, clr]) => `
+          <div style="flex:1;min-width:130px;background:${bg};border-radius:8px;padding:1rem;text-align:center">
+            <div style="font-size:1.8rem;font-weight:700;color:${clr}">${val||0}</div>
+            <div style="font-size:.82rem;color:${clr};font-weight:500">${label}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+async function renderZone(c) {
+  const { ok, data } = await api.get('/challans/stats/dashboard');
+  const zones = data?.zones || [];
+  const maxT = Math.max(...zones.map(z=>parseInt(z.total)||0), 1);
+
+  c.innerHTML = `
+    <div class="card">
+      <div class="card-title" style="margin-bottom:1rem">🗺️ Zone-wise Performance</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Zone</th><th>Total Challans</th><th>Collected</th><th>Visual</th></tr></thead>
+          <tbody>
+            ${zones.map(z => `
+              <tr>
+                <td><strong>${z.zone_name}</strong></td>
+                <td>${z.total}</td>
+                <td style="color:var(--secondary)">${formatCurrency(z.collected)}</td>
+                <td style="width:200px">
+                  <div style="background:#f3f4f6;border-radius:20px;height:10px">
+                    <div style="background:var(--primary);width:${Math.round(parseInt(z.total)/maxT*100)}%;height:100%;border-radius:20px"></div>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+async function renderOfficer(c) {
+  const { ok, data } = await api.get('/officers');
+  const officers = data?.data || [];
+
+  c.innerHTML = `
+    <div class="card">
+      <div class="card-title" style="margin-bottom:1rem">👮 Officer Performance</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Officer</th><th>Badge</th><th>Rank</th><th>Zone</th><th>Total Challans</th></tr></thead>
+          <tbody>
+            ${officers.map(o => `
+              <tr>
+                <td><strong>${o.full_name}</strong></td>
+                <td>${o.badge_number}</td>
+                <td>${o.rank}</td>
+                <td>${o.zone_name||'—'}</td>
+                <td><strong>${o.total_challans||0}</strong></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+async function renderViolation(c) {
+  const { ok, data } = await api.get('/violations');
+  const violations = data?.data || [];
+
+  // Top violations from dashboard
+  const { data: dash } = await api.get('/challans/stats/dashboard');
+  const topV = dash?.topViolations || [];
+  const topMap = {};
+  topV.forEach(v => { topMap[v.description] = v.count; });
+  const maxV = Math.max(...topV.map(v=>v.count), 1);
+
+  c.innerHTML = `
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title" style="margin-bottom:1rem">🏆 Top 5 Violations (by frequency)</div>
+      ${topV.map(v => `
+        <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.6rem;font-size:.88rem">
+          <div style="width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v.description}</div>
+          <div style="flex:1;background:#f3f4f6;border-radius:20px;height:12px">
+            <div style="background:var(--danger);width:${Math.round(v.count/maxV*100)}%;height:100%;border-radius:20px"></div>
+          </div>
+          <div style="width:40px;text-align:right;font-weight:600">${v.count}</div>
+        </div>`).join('')}
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:1rem">📋 All Violation Types</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Code</th><th>Description</th><th>Fine</th><th>Severity</th><th>IPC Section</th></tr></thead>
+          <tbody>
+            ${violations.map(v => `
+              <tr>
+                <td><code>${v.violation_code}</code></td>
+                <td>${v.description}</td>
+                <td><strong>${formatCurrency(v.fine_amount)}</strong></td>
+                <td>${severityBadge(v.severity)}</td>
+                <td><small>${v.ipc_section||'—'}</small></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// Load overview by default
+showTab('overview', document.querySelector('.tab-btn'));
+</script>
+</body>
+</html>

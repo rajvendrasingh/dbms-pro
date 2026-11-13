@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>All Challans — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('All Challans', 'challans');
+
+let currentPage = 1;
+const pageSize  = 20;
+
+async function loadChallans(page = 1) {
+  currentPage = page;
+  const status  = document.getElementById('f-status')?.value  || '';
+  const zone    = document.getElementById('f-zone')?.value    || '';
+  const from    = document.getElementById('f-from')?.value    || '';
+  const to      = document.getElementById('f-to')?.value      || '';
+
+  const params = new URLSearchParams({ page, limit: pageSize });
+  if (status) params.append('status', status);
+  if (zone)   params.append('zone_id', zone);
+  if (from)   params.append('from', from);
+  if (to)     params.append('to', to);
+
+  const tbody = document.getElementById('challan-tbody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="loading-state">⏳ Loading...</td></tr>`;
+
+  const { ok, data } = await api.get(`/challans?${params}`);
+  if (!ok) return;
+
+  const rows = data.data || [];
+  const total = data.total || 0;
+
+  if (tbody) {
+    tbody.innerHTML = rows.length ? rows.map(c => `
+      <tr>
+        <td><a href="/pages/challan-detail.html?id=${c.challan_id}" style="color:var(--primary);font-weight:600">${c.challan_number}</a></td>
+        <td>${c.registration_no}<br><small style="color:#9ca3af">${c.vehicle_type}</small></td>
+        <td>${c.owner_name}<br><small style="color:#9ca3af">${c.owner_phone}</small></td>
+        <td><small>${c.violation_code}</small><br>${c.violation_desc}</td>
+        <td>${severityBadge(c.severity)}</td>
+        <td>${formatCurrency(c.fine_amount)}</td>
+        <td>${statusBadge(c.status)}</td>
+        <td>${formatDateTime(c.violation_date)}</td>
+        <td>
+          <a href="/pages/challan-detail.html?id=${c.challan_id}" class="btn btn-outline btn-sm">View</a>
+          ${c.status === 'Pending' ? `<a href="/pages/payment.html?challan_id=${c.challan_id}" class="btn btn-success btn-sm">Pay</a>` : ''}
+        </td>
+      </tr>
+    `).join('') : `<tr><td colspan="9" class="empty-state">No challans found.</td></tr>`;
+  }
+
+  // Pagination
+  const totalPages = Math.ceil(total / pageSize);
+  const pg = document.getElementById('pagination');
+  if (pg) {
+    let pHtml = `<span style="font-size:.82rem;color:#6b7280;margin-right:.5rem">${total} records</span>`;
+    for (let i = 1; i <= Math.min(totalPages, 10); i++) {
+      pHtml += `<button class="page-btn ${i===page?'active':''}" onclick="loadChallans(${i})">${i}</button>`;
+    }
+    pg.innerHTML = pHtml;
+  }
+}
+
+async function initPage() {
+  // Load zones for filter
+  const { data: zd } = await api.get('/violations/zones');
+  const zones = zd?.data || [];
+  const zOptions = zones.map(z => `<option value="${z.zone_id}">${z.zone_name}</option>`).join('');
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="search-bar">
+      <div class="form-group">
+        <label>Status</label>
+        <select id="f-status">
+          <option value="">All</option>
+          <option>Pending</option><option>Paid</option>
+          <option>Disputed</option><option>Cancelled</option><option>Waived</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Zone</label>
+        <select id="f-zone"><option value="">All Zones</option>${zOptions}</select>
+      </div>
+      <div class="form-group">
+        <label>From Date</label>
+        <input type="date" id="f-from">
+      </div>
+      <div class="form-group">
+        <label>To Date</label>
+        <input type="date" id="f-to">
+      </div>
+      <button class="btn btn-primary" onclick="loadChallans(1)">🔍 Filter</button>
+      <a href="/pages/issue-challan.html" class="btn btn-success" style="margin-left:auto">➕ Issue Challan</a>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Challan No.</th><th>Vehicle</th><th>Owner</th><th>Violation</th>
+              <th>Severity</th><th>Fine</th><th>Status</th><th>Date</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="challan-tbody"><tr><td colspan="9" class="loading-state">⏳</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="pagination"></div>
+    </div>
+  `;
+
+  loadChallans(1);
+}
+
+initPage();
+</script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Record Payment — Traffic Challan System</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .challan-info-box { background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:1rem; margin-bottom:1.2rem; }
+    .challan-info-box h4 { color:var(--primary); margin-bottom:.5rem; }
+    .cib-grid { display:grid; grid-template-columns:1fr 1fr; gap:.4rem .8rem; font-size:.85rem; }
+    .cib-grid span { font-weight:600; }
+    .amount-big { font-size:2rem; font-weight:700; color:var(--danger); }
+    .success-pay { text-align:center; padding:2rem; }
+  </style>
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+if (!requireAuth()) throw '';
+buildLayout('Record Payment', 'payment');
+
+const urlParams = new URLSearchParams(location.search);
+let preloadId   = urlParams.get('challan_id') || '';
+let challanData = null;
+
+function renderPage() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="card" style="max-width:600px">
+      <div class="card-header"><div class="card-title">💳 Record Challan Payment</div></div>
+      <div id="pay-alert"></div>
+      <div id="pay-success" style="display:none"></div>
+
+      <div id="pay-form-wrap">
+        <div class="form-group">
+          <label>Challan Number or ID *</label>
+          <div style="display:flex;gap:.5rem">
+            <input type="text" id="challan-search" placeholder="e.g. CHL20261101000001 or 42" value="${preloadId}">
+            <button class="btn btn-outline" onclick="fetchChallan()">Search</button>
+          </div>
+        </div>
+
+        <div id="challan-info"></div>
+
+        <form id="payment-form" style="display:none">
+          <div class="form-group">
+            <label>Payment Method *</label>
+            <select id="pay-method" required>
+              <option value="">— Select —</option>
+              <option>Cash</option>
+              <option>UPI</option>
+              <option>Net Banking</option>
+              <option>Card</option>
+              <option>Demand Draft</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Transaction Reference / Receipt No. <small style="color:#9ca3af">(optional)</small></label>
+            <input type="text" id="txn-ref" placeholder="e.g. UPI123456789">
+          </div>
+          <div style="display:flex;gap:.75rem;justify-content:flex-end;margin-top:1.2rem">
+            <button type="button" class="btn btn-outline" onclick="resetPay()">Cancel</button>
+            <button type="submit" class="btn btn-success btn-lg" id="pay-btn">✅ Confirm Payment</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('payment-form').addEventListener('submit', submitPayment);
+  if (preloadId) fetchChallan();
+}
+
+async function fetchChallan() {
+  const q = document.getElementById('challan-search').value.trim();
+  if (!q) { showToast('Enter challan number or ID', 'warning'); return; }
+
+  const infoDiv = document.getElementById('challan-info');
+  infoDiv.innerHTML = '<div style="color:#6b7280;font-size:.85rem">🔍 Searching...</div>';
+
+  // Try by ID (numeric) or challan number
+  const endpoint = isNaN(q)
+    ? `/challans?challan_number=${encodeURIComponent(q)}`
+    : `/challans/${q}`;
+
+  const { ok, data } = await api.get(endpoint);
+  let c = null;
+  if (ok) {
+    c = data.data?.challan_id ? data.data : (data.data?.[0] || null);
+  }
+
+  if (!c) { infoDiv.innerHTML = '<div class="alert alert-error">Challan not found.</div>'; challanData = null; document.getElementById('payment-form').style.display='none'; return; }
+
+  challanData = c;
+
+  if (c.status !== 'Pending') {
+    infoDiv.innerHTML = `<div class="alert alert-warning">⚠️ This challan is already <strong>${c.status}</strong>. Payment not required.</div>`;
+    document.getElementById('payment-form').style.display = 'none';
+    return;
+  }
+
+  infoDiv.innerHTML = `
+    <div class="challan-info-box">
+      <h4>📋 ${c.challan_number}</h4>
+      <div class="cib-grid">
+        <div>Vehicle: <span>${c.registration_no}</span></div>
+        <div>Owner: <span>${c.owner_name}</span></div>
+        <div>Violation: <span>${c.violation_desc||c.violation_code}</span></div>
+        <div>Date: <span>${formatDate(c.violation_date)}</span></div>
+        <div>Location: <span>${c.location}</span></div>
+        <div>Due: <span>${formatDate(c.due_date)}</span></div>
+      </div>
+      <div style="margin-top:.8rem">Fine: <span class="amount-big">${formatCurrency(c.fine_amount)}</span></div>
+    </div>`;
+  document.getElementById('payment-form').style.display = 'block';
+}
+
+async function submitPayment(e) {
+  e.preventDefault();
+  if (!challanData) return;
+  const method = document.getElementById('pay-method').value;
+  if (!method) { showToast('Select payment method', 'warning'); return; }
+
+  const btn = document.getElementById('pay-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Processing...';
+
+  const { ok, data } = await api.post(`/challans/${challanData.challan_id}/pay`, {
+    payment_method:  method,
+    transaction_ref: document.getElementById('txn-ref').value.trim() || null
+  });
+
+  if (ok) {
+    document.getElementById('pay-form-wrap').style.display = 'none';
+    document.getElementById('pay-success').style.display = 'block';
+    document.getElementById('pay-success').innerHTML = `
+      <div class="success-pay">
+        <div style="font-size:4rem">✅</div>
+        <h2 style="color:var(--secondary);margin:.6rem 0">Payment Recorded!</h2>
+        <p><strong>${challanData.challan_number}</strong></p>
+        <p style="font-size:1.5rem;font-weight:700;color:var(--secondary);margin:.5rem 0">${formatCurrency(challanData.fine_amount)}</p>
+        <p style="color:#6b7280;font-size:.88rem">Method: ${method}</p>
+        <div style="display:flex;gap:.75rem;justify-content:center;margin-top:1.5rem;flex-wrap:wrap">
+          <button class="btn btn-outline" onclick="resetPay()">New Payment</button>
+          <a href="/pages/challans.html" class="btn btn-primary">View Challans</a>
+        </div>
+      </div>`;
+  } else {
+    showToast(data.message || 'Payment failed', 'error');
+    btn.disabled = false;
+    btn.innerHTML = '✅ Confirm Payment';
+  }
+}
+
+function resetPay() {
+  challanData = null;
+  preloadId   = '';
+  renderPage();
+}
+
+renderPage();
+</script>
+</body>
+</html>
